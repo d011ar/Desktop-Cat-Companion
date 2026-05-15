@@ -1,0 +1,10 @@
+name: desktop-cat
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - PySide6>=6.6
+      - python-dotenv>=1.0
+      - openai>=1.30
