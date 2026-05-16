@@ -9,30 +9,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from llm_client import CatLLMClient
+from agent_core import AgentCore, AgentResult
 
 
 class ChatWorker(QObject):
-    finished = Signal(str, bool)
+    finished = Signal(object)
 
-    def __init__(self, client: CatLLMClient, message: str) -> None:
+    def __init__(self, agent: AgentCore, message: str) -> None:
         super().__init__()
-        self.client = client
+        self.agent = agent
         self.message = message
 
     @Slot()
     def run(self) -> None:
-        result = self.client.chat(self.message)
-        self.finished.emit(result.text, result.used_fallback)
+        result = self.agent.handle_message(self.message)
+        self.finished.emit(result)
 
 
 class ChatPanel(QWidget):
     message_started = Signal()
     message_finished = Signal()
+    tasks_changed = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, agent: AgentCore | None = None, parent=None) -> None:
         super().__init__(parent)
-        self.client = CatLLMClient()
+        self.agent = agent or AgentCore()
         self.thread = None
         self.worker = None
 
@@ -61,8 +62,8 @@ class ChatPanel(QWidget):
         layout.addLayout(input_layout)
 
     def _status_text(self) -> str:
-        if self.client.available:
-            return f"Connected model: {self.client.model}"
+        if self.agent.llm_client.available:
+            return f"Connected model: {self.agent.llm_client.model}"
         return "Local cat mode: OPENAI_API_KEY was not found"
 
     @Slot()
@@ -77,7 +78,7 @@ class ChatPanel(QWidget):
         self.message_started.emit()
 
         self.thread = QThread(self)
-        self.worker = ChatWorker(self.client, message)
+        self.worker = ChatWorker(self.agent, message)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._handle_reply)
@@ -87,10 +88,12 @@ class ChatPanel(QWidget):
         self.thread.finished.connect(self._clear_thread)
         self.thread.start()
 
-    @Slot(str, bool)
-    def _handle_reply(self, text: str, _used_fallback: bool) -> None:
-        self._append("Cat", text)
+    @Slot(object)
+    def _handle_reply(self, result: AgentResult) -> None:
+        self._append("Cat", result.reply)
         self._set_busy(False)
+        if result.changed:
+            self.tasks_changed.emit()
         self.message_finished.emit()
 
     @Slot()
@@ -100,6 +103,9 @@ class ChatPanel(QWidget):
 
     def _append(self, speaker: str, text: str) -> None:
         self.history.append(f"<b>{speaker}:</b> {self._escape(text)}")
+
+    def append_system_message(self, text: str) -> None:
+        self._append("Cat", text)
 
     def _set_busy(self, busy: bool) -> None:
         self.input.setEnabled(not busy)
